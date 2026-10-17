@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grim — the friend who tells you the truth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,500;1,9..144,700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#17141d; --fog:#241f2e; --line:#3a3347; --paper:#ebe6dd; --dim:#9a93a8;
+    --bruise:#8c6a9e; --ember:#e8a25c;
+  }
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%,#2b2238 0%,var(--ink) 60%);
+    color:var(--paper);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif;
+    display:flex;justify-content:center;
+  }
+  .app{width:100%;max-width:720px;height:100%;display:flex;flex-direction:column;padding:0 18px}
+  header{padding:34px 0 18px;border-bottom:1px solid var(--line)}
+  h1{font:italic 700 clamp(2.4rem,7vw,3.6rem)/1 Fraunces,serif;letter-spacing:-.02em}
+  header p{color:var(--dim);margin-top:8px;max-width:46ch}
+  #log{flex:1;overflow-y:auto;padding:22px 0;display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
+  .msg{max-width:84%;padding:11px 15px;border-radius:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .bot{background:var(--fog);border:1px solid var(--line);border-top-left-radius:3px;align-self:flex-start}
+  .bot b{display:block;font:italic 500 .85rem Fraunces,serif;color:var(--ember);margin-bottom:2px}
+  .me{background:var(--bruise);color:#fff;border-bottom-right-radius:3px;align-self:flex-end}
+  .dots span{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:var(--dim);animation:b 1.2s infinite}
+  .dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+  @keyframes b{0%,60%,100%{opacity:.25}30%{opacity:1}}
+  form{display:flex;gap:10px;padding:14px 0 22px;border-top:1px solid var(--line)}
+  input{flex:1;background:var(--fog);border:1px solid var(--line);color:var(--paper);
+    padding:13px 15px;border-radius:10px;font:inherit}
+  input::placeholder{color:var(--dim)}
+  input:focus,button:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
+  button{background:var(--ember);color:#241a0d;border:0;border-radius:10px;padding:0 20px;font:500 1rem inherit;cursor:pointer}
+  button:disabled{opacity:.5;cursor:wait}
+  @media (prefers-reduced-motion:reduce){.dots span{animation:none}#log{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Grim.</h1>
+    <p>Brutally honest, annoyingly smart, secretly on your side. Ask anything. Brace yourself.</p>
+  </header>
+  <div id="log" aria-live="polite"></div>
+  <form id="f">
+    <input id="q" placeholder="Say something. Try to make it interesting." autocomplete="off" required>
+    <button id="send">Send</button>
+  </form>
+</div>
+
+<script>
+// 1) After deploying the Cloudflare Worker, paste its URL here:
+const API = "https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev";
+
+const fallbackRoasts = [
+  "Oh, you're back. The bar was on the floor and you still tripped over it.",
+  "Another visit. Your browser history must be a cry for help.",
+  "Welcome. I'd say I missed you, but I have standards.",
+  "You opened a snarky chatbot on purpose. Brave, or just lonely?",
+  "Look who survived another day without a plan. Sit down."
+];
+
+const log = document.getElementById("log");
+const form = document.getElementById("f");
+const input = document.getElementById("q");
+const btn = document.getElementById("send");
+let history = [];
+
+function add(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + (role === "me" ? "me" : "bot");
+  if (role === "bot") d.innerHTML = "<b>Grim</b>";
+  d.append(document.createTextNode(text));
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+
+async function ask(userText) {
+  const typing = add("bot", "");
+  typing.insertAdjacentHTML("beforeend", '<span class="dots"><span></span><span></span><span></span></span>');
+  btn.disabled = true;
+  try {
+    const r = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: history.concat({ role: "user", content: userText }) })
+    });
+    const data = await r.json();
+    if (!data.reply) throw new Error("empty");
+    typing.remove();
+    add("bot", data.reply);
+    history.push({ role: "user", content: userText }, { role: "assistant", content: data.reply });
+    history = history.slice(-12);
+    return true;
+  } catch (e) {
+    typing.remove();
+    add("bot", "My brain is down. Typical. Even my failures are more reliable than your study schedule. Try again.");
+    return false;
+  } finally { btn.disabled = false; input.focus(); }
+}
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const t = input.value.trim();
+  if (!t) return;
+  input.value = "";
+  add("me", t);
+  await ask(t);
+});
+
+// Greeting: instant fallback roast, replaced by a fresh AI roast if the API answers
+(async function greet() {
+  const placeholder = add("bot", fallbackRoasts[Math.floor(Math.random() * fallbackRoasts.length)]);
+  try {
+    const r = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "[Visitor just opened the site. Greet them with one fresh, witty insult, 1-2 sentences, then dare them to ask something.]" }] })
+    });
+    const data = await r.json();
+    if (data.reply) placeholder.lastChild.textContent = data.reply;
+  } catch (e) { /* fallback stays */ }
+})();
+</script>
+</body>
+</html>
